@@ -2,14 +2,54 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 )
 
+// Struct to store JSON data
 type city struct {
 	Name string
 	Area uint64
+}
+
+// Middleware to check if the content type is JSON
+func filterContentType(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		// Check the content, then handle the request.
+		// This middleware acts before the mainLogic
+		log.Println("Currently in the check content type middleware")
+
+		// Filter requests by MIME type
+		if r.Header.Get("Content-type") != "application/json" {
+			rw.WriteHeader(http.StatusUnsupportedMediaType)
+			rw.Write([]byte("415 - Unsupported Media Type. Please send JSON"))
+		} else {
+			handler.ServeHTTP(rw, r)
+		}
+	})
+}
+
+// Middleware to add timestamp to response cookie
+func setServerTimeCookie(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		// Do business logic, then apply the server time to cookie.
+		// This middleware acts after mainLogic
+		handler.ServeHTTP(rw, r)
+
+		// Create cookie
+		cookie := http.Cookie{
+			Name:  "Server-Time(UTC)",
+			Value: strconv.FormatInt(time.Now().Unix(), 10),
+		}
+
+		// Set the cookie
+		http.SetCookie(rw, &cookie)
+
+		// Print where we are
+		log.Println("Currently in the set server time middleware")
+	})
 }
 
 func mainLogic(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +66,7 @@ func mainLogic(w http.ResponseWriter, r *http.Request) {
 
 		// Instead of creating a resource using received data,
 		// we print data to stdout
-		fmt.Printf("Got %s city with area of %d sq miles!\n",
+		log.Printf("Got %s city with area of %d sq miles!\n",
 			cityPayload.Name, cityPayload.Area)
 
 		// Set the response status to OK
@@ -40,6 +80,8 @@ func mainLogic(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/city", mainLogic)
+	mainLogicHandler := http.HandlerFunc(mainLogic)
+	// The chaining may be unreadable if we add more steps!
+	http.Handle("/city", filterContentType(setServerTimeCookie(mainLogicHandler)))
 	log.Fatal(http.ListenAndServe(":8000", nil))
 }
